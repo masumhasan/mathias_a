@@ -16,9 +16,7 @@ const companyLinks = [
   { label: 'Terms of Service', href: '/terms-of-service' }
 ]
 
-export default function Footer({ user }: { user: any }) {
-  const ctaHref = user ? '/chat' : '/register'
-
+export default function Footer() {
   return (
     <footer className="footer">
       <div className="footer-grid">
@@ -37,7 +35,7 @@ export default function Footer({ user }: { user: any }) {
           <p className="footer-brand-desc">
             Expert legal services for expats and remote workers in Germany.
           </p>
-          <Link href={ctaHref} className="btn-sm">
+          <Link href="/chat" className="btn-sm">
             Start Consultation
           </Link>
         </div>
