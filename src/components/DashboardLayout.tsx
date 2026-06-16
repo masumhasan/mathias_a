@@ -70,7 +70,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     if (pathname === '/dashboard/chat') return 'Chatbot Packages'
     if (pathname === '/dashboard/inbox') return 'Client Chats'
     if (pathname === '/dashboard/payments') return 'Payments & Billing'
-    if (pathname === '/dashboard/clients') return 'Legal Advise Clients'
+    if (pathname === '/dashboard/clients') return 'All Members'
     if (pathname?.startsWith('/dashboard/clients/')) return 'Client Profile'
     if (pathname === '/dashboard/pages') return 'Manage Dynamic Pages'
     return 'Dashboard'

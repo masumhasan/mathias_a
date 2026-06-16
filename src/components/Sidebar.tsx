@@ -26,7 +26,7 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
     { label: 'Packages', icon: <ChatBubbleIcon />, href: '/dashboard/chat' },
     { label: 'Client Chats', icon: <InboxIcon />, href: '/dashboard/inbox' },
     { label: 'Payments', icon: <PaymentIcon />, href: '/dashboard/payments' },
-    { label: 'Legal Advise Clients', icon: <UsersIcon />, href: '/dashboard/clients' },
+    { label: 'All Members', icon: <UsersIcon />, href: '/dashboard/clients' },
     { label: 'Manage Pages', icon: <DocumentIcon />, href: '/dashboard/pages' },
   ]
 

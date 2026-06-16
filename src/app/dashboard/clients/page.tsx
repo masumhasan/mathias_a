@@ -106,7 +106,7 @@ export default function ClientsPage() {
 
       {/* Page Title & Subtitle */}
       <div>
-        <h2 style={{ fontSize: '24px', fontWeight: '600', color: '#1a1a2e', margin: 0 }}>Legal Advise Clients</h2>
+        <h2 style={{ fontSize: '24px', fontWeight: '600', color: '#1a1a2e', margin: 0 }}>All Members</h2>
         <p style={{ color: 'rgba(0,0,0,0.4)', fontSize: '14px', marginTop: '4px' }}>Users registered on the platform for legal advice via /legalchat</p>
       </div>
 
