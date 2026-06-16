@@ -24,9 +24,9 @@ export default function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   const navItems = [
     { label: 'Overview', icon: <BarChartIcon />, href: '/dashboard' },
     { label: 'Chatbot', icon: <ChatBubbleIcon />, href: '/dashboard/chat' },
-    { label: 'Inbox', icon: <InboxIcon />, href: '/dashboard/inbox' },
+    { label: 'Client Chats', icon: <InboxIcon />, href: '/dashboard/inbox' },
     { label: 'Payments', icon: <PaymentIcon />, href: '/dashboard/payments' },
-    { label: 'Clients', icon: <UsersIcon />, href: '/dashboard/clients' },
+    { label: 'Legal Advise Clients', icon: <UsersIcon />, href: '/dashboard/clients' },
     { label: 'Manage Pages', icon: <DocumentIcon />, href: '/dashboard/pages' },
   ]
 

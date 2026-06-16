@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, FormEvent, KeyboardEvent } from 'react'
 import Link from 'next/link'
 import ReactMarkdown from 'react-markdown'
 import { ScalesIcon } from '@/components/Icons'
+import { getClientToken, setClientToken, clearClientToken } from '@/lib/clientChatAuth'
 
 /* ── Types ───────────────────────────────────────────────── */
 type ChatMessage = {
@@ -13,17 +14,26 @@ type ChatMessage = {
 }
 
 type Stage =
-  | { kind: 'gate' }
-  | { kind: 'chat'; sessionId: string; userEmail: string; emailCount: number }
+  | { kind: 'loading' }
+  | { kind: 'register' }
+  | { kind: 'login'; notice?: string }
+  | { kind: 'verify'; email: string; devOtp?: string }
+  | { kind: 'chat' }
 
 /* ── API ─────────────────────────────────────────────────── */
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
 
-async function apiPost<T>(path: string, body: unknown): Promise<T> {
+async function apiRequest<T>(
+  path: string,
+  options: { method?: string; body?: unknown; token?: string | null } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (options.token) headers.Authorization = `Bearer ${options.token}`
+
   const res = await fetch(`${BACKEND}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method: options.method ?? (options.body ? 'POST' : 'GET'),
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
   })
   const data = await res.json()
   if (!res.ok) throw new Error((data as { error?: string }).error ?? `Request failed: ${res.status}`)
@@ -45,19 +55,15 @@ function BotMessage({ content }: { content: string }) {
   return (
     <ReactMarkdown
       components={{
-        // Paragraphs
         p: ({ children }) => (
           <p style={{ margin: '0 0 10px', lineHeight: 1.65, color: '#1a1a2e' }}>{children}</p>
         ),
-        // Bold
         strong: ({ children }) => (
           <strong style={{ fontWeight: '700', color: '#1a1a2e' }}>{children}</strong>
         ),
-        // Italic
         em: ({ children }) => (
           <em style={{ fontStyle: 'italic', color: '#444' }}>{children}</em>
         ),
-        // Headings
         h1: ({ children }) => (
           <h1 style={{ fontSize: '17px', fontWeight: '700', color: '#1a1a2e', margin: '14px 0 6px', letterSpacing: '-0.01em' }}>{children}</h1>
         ),
@@ -67,19 +73,15 @@ function BotMessage({ content }: { content: string }) {
         h3: ({ children }) => (
           <h3 style={{ fontSize: '13px', fontWeight: '700', color: '#c9a84c', margin: '10px 0 4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{children}</h3>
         ),
-        // Bullet list
         ul: ({ children }) => (
           <ul style={{ margin: '6px 0 10px', paddingLeft: '20px', listStyleType: 'disc', color: '#1a1a2e' }}>{children}</ul>
         ),
-        // Numbered list
         ol: ({ children }) => (
           <ol style={{ margin: '6px 0 10px', paddingLeft: '20px', color: '#1a1a2e' }}>{children}</ol>
         ),
-        // List item
         li: ({ children }) => (
           <li style={{ marginBottom: '4px', lineHeight: 1.6 }}>{children}</li>
         ),
-        // Inline code
         code: ({ children, className }) => {
           const isBlock = className?.startsWith('language-')
           if (isBlock) {
@@ -93,15 +95,12 @@ function BotMessage({ content }: { content: string }) {
             <code style={{ background: '#f4f3ef', borderRadius: '4px', padding: '2px 6px', fontFamily: 'monospace', fontSize: '13px', color: '#c9a84c' }}>{children}</code>
           )
         },
-        // Horizontal rule
         hr: () => (
           <hr style={{ border: 'none', borderTop: '1px solid #eee', margin: '12px 0' }} />
         ),
-        // Blockquote (email content, quoted text)
         blockquote: ({ children }) => (
           <blockquote style={{ borderLeft: '3px solid #c9a84c', paddingLeft: '12px', margin: '8px 0', color: '#666', fontStyle: 'italic' }}>{children}</blockquote>
         ),
-        // Links
         a: ({ href, children }) => (
           <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#c9a84c', textDecoration: 'underline' }}>{children}</a>
         ),
@@ -112,42 +111,13 @@ function BotMessage({ content }: { content: string }) {
   )
 }
 
-/* ── Email Gate ──────────────────────────────────────────── */
-function EmailGate({ onSuccess }: { onSuccess: (sessionId: string, userEmail: string, emailCount: number) => void }) {
-  const [email, setEmail] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    const trimmed = email.trim().toLowerCase()
-    if (!trimmed) return
-    setError('')
-    setLoading(true)
-    try {
-      const data = await apiPost<{ sessionId: string; userEmail: string; emailCount: number }>(
-        '/api/chat/sessions',
-        { email: trimmed },
-      )
-      onSuccess(data.sessionId, data.userEmail, data.emailCount)
-    } catch (err) {
-      setError((err as Error).message || 'Unable to verify your email. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
+/* ── Shared auth card shell ──────────────────────────────── */
+function AuthCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <div style={{
-      flex: 1,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '40px 24px',
-    }}>
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
       <div style={{
         width: '100%',
-        maxWidth: '420px',
+        maxWidth: '440px',
         background: '#fff',
         borderRadius: '20px',
         border: '1px solid #eee',
@@ -159,96 +129,314 @@ function EmailGate({ onSuccess }: { onSuccess: (sessionId: string, userEmail: st
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <h2 style={{ fontSize: '22px', fontWeight: '700', color: '#1a1a2e', margin: 0, letterSpacing: '-0.02em' }}>
-            Client Portal
+            {title}
           </h2>
-          <p style={{ fontSize: '14px', color: '#888', margin: 0, lineHeight: 1.5 }}>
-            Enter the email address associated with your case to access your records.
-          </p>
+          <p style={{ fontSize: '14px', color: '#888', margin: 0, lineHeight: 1.5 }}>{subtitle}</p>
         </div>
-
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="your@email.com"
-            disabled={loading}
-            autoFocus
-            autoComplete="email"
-            required
-            style={{
-              height: '48px',
-              borderRadius: '12px',
-              border: `1.5px solid ${error ? '#ef4444' : '#e0e0e0'}`,
-              padding: '0 16px',
-              fontSize: '15px',
-              outline: 'none',
-              color: '#1a1a2e',
-              background: loading ? '#fafafa' : '#fff',
-              transition: 'border-color 0.2s',
-            }}
-            onFocus={e => { e.currentTarget.style.borderColor = '#c9a84c' }}
-            onBlur={e => { e.currentTarget.style.borderColor = error ? '#ef4444' : '#e0e0e0' }}
-          />
-
-          {error && (
-            <p role="alert" style={{ fontSize: '13px', color: '#ef4444', margin: 0 }}>
-              {error}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !email.trim()}
-            style={{
-              height: '48px',
-              borderRadius: '12px',
-              background: loading || !email.trim() ? '#e0e0e0' : '#1a1a2e',
-              color: loading || !email.trim() ? '#999' : '#fff',
-              border: 'none',
-              fontSize: '15px',
-              fontWeight: '600',
-              cursor: loading || !email.trim() ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s',
-              letterSpacing: '0.01em',
-            }}
-          >
-            {loading ? 'Verifying…' : 'Continue'}
-          </button>
-        </form>
-
-        <p style={{ fontSize: '12px', color: '#bbb', margin: 0, textAlign: 'center', lineHeight: 1.5 }}>
-          Your email is used only to retrieve your case records. No data is stored beyond this session.
-        </p>
+        {children}
       </div>
     </div>
   )
 }
 
-/* ── Chat Area ───────────────────────────────────────────── */
-function ChatArea({
-  sessionId,
-  userEmail,
-  emailCount,
-  onSignOut,
+const inputStyle = (hasError: boolean): React.CSSProperties => ({
+  height: '46px',
+  borderRadius: '12px',
+  border: `1.5px solid ${hasError ? '#ef4444' : '#e0e0e0'}`,
+  padding: '0 16px',
+  fontSize: '15px',
+  outline: 'none',
+  color: '#1a1a2e',
+  width: '100%',
+  background: '#fff',
+})
+
+const labelStyle: React.CSSProperties = { fontSize: '13px', fontWeight: 600, color: '#444', marginBottom: '6px', display: 'block' }
+
+const submitBtnStyle = (disabled: boolean): React.CSSProperties => ({
+  height: '48px',
+  borderRadius: '12px',
+  background: disabled ? '#e0e0e0' : '#1a1a2e',
+  color: disabled ? '#999' : '#fff',
+  border: 'none',
+  fontSize: '15px',
+  fontWeight: '600',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  letterSpacing: '0.01em',
+})
+
+/* ── Register Form ───────────────────────────────────────── */
+function RegisterForm({
+  onRegistered,
+  onShowLogin,
 }: {
-  sessionId: string
-  userEmail: string
-  emailCount: number
-  onSignOut: () => void
+  onRegistered: (email: string, devOtp?: string) => void
+  onShowLogin: () => void
 }) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: 'assistant',
-      content: `Hello! I have access to ${emailCount.toLocaleString()} email records associated with ${userEmail}. How can I help you today? You can ask about case updates, upcoming deadlines, or any correspondence.`,
-      timestamp: new Date().toISOString(),
-    },
-  ])
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError('')
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+    setLoading(true)
+    try {
+      const data = await apiRequest<{ email: string; otp?: string }>('/api/auth/register', {
+        body: { email, password, firstName, lastName, role: 'client' },
+      })
+      onRegistered(data.email, data.otp)
+    } catch (err) {
+      setError((err as Error).message || 'Registration failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <AuthCard title="Client Portal" subtitle="Register to access your case chat with Mathias's office.">
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>First Name</label>
+            <input style={inputStyle(false)} required value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="John" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Last Name</label>
+            <input style={inputStyle(false)} required value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Doe" />
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Email Address</label>
+          <input type="email" style={inputStyle(false)} required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@email.com" />
+        </div>
+        <div>
+          <label style={labelStyle}>Password</label>
+          <input type="password" style={inputStyle(false)} required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        <div>
+          <label style={labelStyle}>Confirm Password</label>
+          <input type="password" style={inputStyle(false)} required minLength={8} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        {error && <p role="alert" style={{ fontSize: '13px', color: '#ef4444', margin: 0 }}>{error}</p>}
+        <button type="submit" disabled={loading} style={submitBtnStyle(loading)}>
+          {loading ? 'Creating account…' : 'Create Account'}
+        </button>
+      </form>
+      <p style={{ fontSize: '13px', color: '#888', margin: 0, textAlign: 'center' }}>
+        Already registered? <button type="button" onClick={onShowLogin} style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, cursor: 'pointer' }}>Sign in</button>
+      </p>
+    </AuthCard>
+  )
+}
+
+/* ── Login Form ───────────────────────────────────────────── */
+function LoginForm({
+  notice,
+  onLoggedIn,
+  onShowRegister,
+}: {
+  notice?: string
+  onLoggedIn: (token: string) => void
+  onShowRegister: () => void
+}) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const data = await apiRequest<{ token: string; user: { role: string } }>('/api/auth/login', {
+        body: { email, password },
+      })
+      if (data.user.role !== 'client') {
+        throw new Error('This account is not registered for the client chat portal.')
+      }
+      onLoggedIn(data.token)
+    } catch (err) {
+      setError((err as Error).message || 'Login failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <AuthCard title="Welcome Back" subtitle="Sign in to continue your conversation.">
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {notice && <p style={{ fontSize: '13px', color: '#0a7d3c', margin: 0 }}>{notice}</p>}
+        <div>
+          <label style={labelStyle}>Email Address</label>
+          <input type="email" style={inputStyle(false)} required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your@email.com" />
+        </div>
+        <div>
+          <label style={labelStyle}>Password</label>
+          <input type="password" style={inputStyle(false)} required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+        </div>
+        {error && <p role="alert" style={{ fontSize: '13px', color: '#ef4444', margin: 0 }}>{error}</p>}
+        <button type="submit" disabled={loading} style={submitBtnStyle(loading)}>
+          {loading ? 'Signing in…' : 'Sign In'}
+        </button>
+      </form>
+      <p style={{ fontSize: '13px', color: '#888', margin: 0, textAlign: 'center' }}>
+        New client? <button type="button" onClick={onShowRegister} style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, cursor: 'pointer' }}>Create an account</button>
+      </p>
+    </AuthCard>
+  )
+}
+
+/* ── OTP Verify Form ──────────────────────────────────────── */
+function VerifyForm({
+  email,
+  devOtp,
+  onVerified,
+}: {
+  email: string
+  devOtp?: string
+  onVerified: (token: string) => void
+}) {
+  const [otp, setOtp] = useState(['', '', '', '', '', ''])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [resending, setResending] = useState(false)
+  const [resendMessage, setResendMessage] = useState('')
+  const [currentDevOtp, setCurrentDevOtp] = useState(devOtp)
+
+  const handleOtpInput = (index: number, val: string) => {
+    if (val.length > 1) return
+    const newOtp = [...otp]
+    newOtp[index] = val
+    setOtp(newOtp)
+    if (val && index < 5) {
+      const nextInput = document.getElementById(`client-otp-${index + 1}`)
+      if (nextInput) (nextInput as HTMLInputElement).focus()
+    }
+  }
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const data = await apiRequest<{ token: string }>('/api/auth/verify-otp', {
+        body: { email, otp: otp.join('') },
+      })
+      onVerified(data.token)
+    } catch (err) {
+      setError((err as Error).message || 'Verification failed.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    setResending(true)
+    setResendMessage('')
+    try {
+      const data = await apiRequest<{ message: string; otp?: string }>('/api/auth/resend-otp', {
+        body: { email },
+      })
+      setResendMessage(data.message)
+      setCurrentDevOtp(data.otp)
+    } catch (err) {
+      setResendMessage((err as Error).message || 'Failed to resend code.')
+    } finally {
+      setResending(false)
+    }
+  }
+
+  return (
+    <AuthCard title="Verify Your Email" subtitle={`Enter the 6-digit code sent to ${email}`}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+          {otp.map((d, i) => (
+            <input
+              key={i}
+              id={`client-otp-${i}`}
+              type="text"
+              maxLength={1}
+              value={d}
+              onChange={(e) => handleOtpInput(i, e.target.value)}
+              style={{ ...inputStyle(false), width: '44px', textAlign: 'center', fontWeight: 'bold', padding: 0 }}
+            />
+          ))}
+        </div>
+
+        {currentDevOtp && (
+          <p style={{
+            fontSize: '12px',
+            color: '#0a7d3c',
+            background: '#eafaf0',
+            border: '1px solid #b9eccb',
+            borderRadius: '8px',
+            padding: '8px 12px',
+            margin: 0,
+            textAlign: 'center',
+          }}>
+            Development mode — your verification code is <strong>{currentDevOtp}</strong>
+          </p>
+        )}
+
+        {error && <p role="alert" style={{ fontSize: '13px', color: '#ef4444', margin: 0, textAlign: 'center' }}>{error}</p>}
+        {resendMessage && <p style={{ fontSize: '13px', color: '#666', margin: 0, textAlign: 'center' }}>{resendMessage}</p>}
+
+        <button type="submit" disabled={loading} style={submitBtnStyle(loading)}>
+          {loading ? 'Verifying…' : 'Verify Email'}
+        </button>
+
+        <p style={{ fontSize: '13px', color: '#888', margin: 0, textAlign: 'center' }}>
+          Didn&apos;t get the code?{' '}
+          <button type="button" disabled={resending} onClick={handleResend} style={{ background: 'none', border: 'none', color: '#c9a84c', fontWeight: 600, cursor: 'pointer' }}>
+            {resending ? 'Resending…' : 'Resend OTP'}
+          </button>
+        </p>
+      </form>
+    </AuthCard>
+  )
+}
+
+/* ── Chat Area ───────────────────────────────────────────── */
+function ChatArea({ token, onSignOut }: { token: string; onSignOut: () => void }) {
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [initializing, setInitializing] = useState(true)
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    apiRequest<{ conversation: { messages: ChatMessage[] } }>('/api/client-chat/conversation', { token })
+      .then((data) => {
+        if (cancelled) return
+        if (data.conversation.messages.length > 0) {
+          setMessages(data.conversation.messages)
+        } else {
+          setMessages([
+            {
+              role: 'assistant',
+              content: 'Hello! I have access to the email records associated with your case. How can I help you today?',
+              timestamp: new Date().toISOString(),
+            },
+          ])
+        }
+      })
+      .catch((err) => setError((err as Error).message || 'Failed to load your conversation.'))
+      .finally(() => { if (!cancelled) setInitializing(false) })
+    return () => { cancelled = true }
+  }, [token])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -264,10 +452,10 @@ function ChatArea({
     setError('')
 
     try {
-      const data = await apiPost<{ response: string; emailsUsed: number }>(
-        `/api/chat/sessions/${sessionId}/messages`,
-        { message: text },
-      )
+      const data = await apiRequest<{ response: string }>('/api/client-chat/messages', {
+        token,
+        body: { message: text },
+      })
       setMessages(prev => [...prev, { role: 'assistant', content: data.response, timestamp: new Date().toISOString() }])
     } catch (err) {
       setError((err as Error).message || 'Failed to get a response. Please try again.')
@@ -284,9 +472,16 @@ function ChatArea({
     }
   }
 
+  if (initializing) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '14px' }}>
+        Loading your conversation…
+      </div>
+    )
+  }
+
   return (
     <>
-      {/* Messages */}
       <div className="chat-messages">
         {messages.map((msg, idx) => (
           <div
@@ -309,7 +504,6 @@ function ChatArea({
           </div>
         ))}
 
-        {/* Typing indicator */}
         {loading && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
             <div className="message-bubble message-bot" style={{ border: '1px solid #eee' }}>
@@ -345,7 +539,6 @@ function ChatArea({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <div className="chat-input-container">
         <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
           <textarea
@@ -370,10 +563,7 @@ function ChatArea({
               fontFamily: 'inherit',
               lineHeight: 1.5,
               background: loading ? '#fafafa' : '#fff',
-              transition: 'border-color 0.2s',
             }}
-            onFocus={e => { e.currentTarget.style.borderColor = '#c9a84c' }}
-            onBlur={e => { e.currentTarget.style.borderColor = '#e0e0e0' }}
           />
           <button
             className="chat-btn btn-send"
@@ -392,7 +582,7 @@ function ChatArea({
             onClick={onSignOut}
             style={{ background: 'none', border: 'none', fontSize: '12px', color: '#aaa', cursor: 'pointer', textDecoration: 'underline' }}
           >
-            Change email
+            Sign out
           </button>
         </div>
       </div>
@@ -410,17 +600,44 @@ function ChatArea({
 /* ── Page ────────────────────────────────────────────────── */
 export default function ExternalChatPage() {
   const [mounted, setMounted] = useState(false)
-  const [stage, setStage] = useState<Stage>({ kind: 'gate' })
+  const [stage, setStage] = useState<Stage>({ kind: 'loading' })
+  const [token, setToken] = useState<string | null>(null)
 
-  useEffect(() => { setMounted(true) }, [])
+  useEffect(() => {
+    setMounted(true)
+    const existing = getClientToken()
+    if (!existing) {
+      setStage({ kind: 'register' })
+      return
+    }
+    apiRequest<{ user: { role: string } }>('/api/auth/me', { token: existing })
+      .then((data) => {
+        if (data.user.role === 'client') {
+          setToken(existing)
+          setStage({ kind: 'chat' })
+        } else {
+          clearClientToken()
+          setStage({ kind: 'register' })
+        }
+      })
+      .catch(() => {
+        clearClientToken()
+        setStage({ kind: 'register' })
+      })
+  }, [])
 
   if (!mounted) return null
+
+  const handleSignOut = () => {
+    clearClientToken()
+    setToken(null)
+    setStage({ kind: 'login' })
+  }
 
   return (
     <div className="chat-root" suppressHydrationWarning>
       <main className="chat-main" style={{ marginLeft: 0, display: 'flex', flexDirection: 'column' }}>
 
-        {/* Header */}
         <header className="chat-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div className="chat-bot-info">
@@ -431,11 +648,7 @@ export default function ExternalChatPage() {
                 <div className="chat-bot-name" style={{ fontSize: '15px' }}>Legal AI Assistant</div>
                 <div className="chat-bot-status">
                   <span className="status-dot" />
-                  <span>
-                    {stage.kind === 'chat'
-                      ? `${stage.emailCount.toLocaleString()} records · ${stage.userEmail}`
-                      : 'Verified Legal Agent'}
-                  </span>
+                  <span>{stage.kind === 'chat' ? 'Verified Client' : 'Client Portal'}</span>
                 </div>
               </div>
             </div>
@@ -448,19 +661,37 @@ export default function ExternalChatPage() {
           </div>
         </header>
 
-        {stage.kind === 'gate' ? (
-          <EmailGate
-            onSuccess={(sessionId, userEmail, emailCount) =>
-              setStage({ kind: 'chat', sessionId, userEmail, emailCount })
-            }
+        {stage.kind === 'loading' && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '14px' }}>
+            Loading…
+          </div>
+        )}
+
+        {stage.kind === 'register' && (
+          <RegisterForm
+            onRegistered={(email, devOtp) => setStage({ kind: 'verify', email, devOtp })}
+            onShowLogin={() => setStage({ kind: 'login' })}
           />
-        ) : (
-          <ChatArea
-            sessionId={stage.sessionId}
-            userEmail={stage.userEmail}
-            emailCount={stage.emailCount}
-            onSignOut={() => setStage({ kind: 'gate' })}
+        )}
+
+        {stage.kind === 'login' && (
+          <LoginForm
+            notice={stage.notice}
+            onLoggedIn={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
+            onShowRegister={() => setStage({ kind: 'register' })}
           />
+        )}
+
+        {stage.kind === 'verify' && (
+          <VerifyForm
+            email={stage.email}
+            devOtp={stage.devOtp}
+            onVerified={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
+          />
+        )}
+
+        {stage.kind === 'chat' && token && (
+          <ChatArea token={token} onSignOut={handleSignOut} />
         )}
 
       </main>

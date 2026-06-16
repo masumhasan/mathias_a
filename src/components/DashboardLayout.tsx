@@ -2,8 +2,11 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import Sidebar from '@/components/Sidebar'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { MenuIcon, BellIcon } from '@/components/Icons'
+import { getAdminToken, clearAdminToken } from '@/lib/adminAuth'
+
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3005'
 
 // ── Context ───────────────────────────────────────────────────────────────────
 
@@ -34,20 +37,41 @@ export function useSidebar() {
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const { sidebarOpen, setSidebarOpen } = useSidebar()
   const pathname = usePathname()
+  const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const [authorized, setAuthorized] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-  }, [])
 
-  if (!mounted) return null
+    const token = getAdminToken()
+    if (!token) {
+      router.push('/admin/login')
+      return
+    }
+
+    fetch(`${BACKEND}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Invalid session')
+        const data = await res.json()
+        if (data.user?.role !== 'admin') throw new Error('Not an admin')
+        setAuthorized(true)
+      })
+      .catch(() => {
+        clearAdminToken()
+        router.push('/admin/login')
+      })
+  }, [router])
+
+  if (!mounted || !authorized) return null
 
   const getPageTitle = () => {
     if (pathname === '/dashboard') return 'Dashboard Overview'
     if (pathname === '/dashboard/chat') return 'Chatbot Packages'
-    if (pathname === '/dashboard/inbox') return 'Message Inbox'
+    if (pathname === '/dashboard/inbox') return 'Client Chats'
     if (pathname === '/dashboard/payments') return 'Payments & Billing'
-    if (pathname === '/dashboard/clients') return 'Client Management'
+    if (pathname === '/dashboard/clients') return 'Legal Advise Clients'
+    if (pathname?.startsWith('/dashboard/clients/')) return 'Client Profile'
     if (pathname === '/dashboard/pages') return 'Manage Dynamic Pages'
     return 'Dashboard'
   }
