@@ -194,6 +194,11 @@ export default function ChatPage() {
       .then(async (res) => {
         if (!res.ok) throw new Error('Invalid session')
         const data = await res.json()
+        if (data.user?.role === 'client') {
+          clearToken()
+          router.push('/client-chat')
+          return
+        }
         const fullName = `${data.user?.firstName ?? ''} ${data.user?.lastName ?? ''}`.trim()
         setUserName(fullName || data.user?.email || '')
         setAuthChecked(true)

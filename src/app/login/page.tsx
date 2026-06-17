@@ -84,7 +84,13 @@ export default function LoginPage() {
       }
 
       setToken(data.token)
-      router.push('/legalchat')
+      if (data.user?.role === 'client') {
+        router.push('/client-chat')
+      } else if (data.user?.role === 'admin') {
+        router.push('/dashboard')
+      } else {
+        router.push('/legalchat')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

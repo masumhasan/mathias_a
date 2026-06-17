@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, FormEvent, KeyboardEvent } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import ReactMarkdown from 'react-markdown'
 import { ScalesIcon } from '@/components/Icons'
 import { getClientToken, setClientToken, clearClientToken } from '@/lib/clientChatAuth'
@@ -252,6 +253,7 @@ function LoginForm({
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const router = useRouter()
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -261,8 +263,12 @@ function LoginForm({
       const data = await apiRequest<{ token: string; user: { role: string } }>('/api/auth/login', {
         body: { email, password },
       })
+      if (data.user.role === 'user') {
+        router.push('/legalchat')
+        return
+      }
       if (data.user.role !== 'client') {
-        throw new Error('This account is not registered for the client chat portal.')
+        throw new Error('Access denied. This portal is for registered clients only.')
       }
       onLoggedIn(data.token)
     } catch (err) {
@@ -596,6 +602,7 @@ export default function ExternalChatPage() {
   const [mounted, setMounted] = useState(false)
   const [stage, setStage] = useState<Stage>({ kind: 'loading' })
   const [token, setToken] = useState<string | null>(null)
+  const router = useRouter()
 
   useEffect(() => {
     setMounted(true)
@@ -609,6 +616,9 @@ export default function ExternalChatPage() {
         if (data.user.role === 'client') {
           setToken(existing)
           setStage({ kind: 'chat' })
+        } else if (data.user.role === 'user') {
+          clearClientToken()
+          router.push('/legalchat')
         } else {
           clearClientToken()
           setStage({ kind: 'register' })
@@ -618,7 +628,7 @@ export default function ExternalChatPage() {
         clearClientToken()
         setStage({ kind: 'register' })
       })
-  }, [])
+  }, [router])
 
   if (!mounted) return null
 
@@ -663,38 +673,40 @@ export default function ExternalChatPage() {
           </div>
         </header>
 
-        {stage.kind === 'loading' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '14px' }}>
-            Loading…
-          </div>
-        )}
+        <div className="client-chat-body">
+          {stage.kind === 'loading' && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: '14px' }}>
+              Loading…
+            </div>
+          )}
 
-        {stage.kind === 'register' && (
-          <RegisterForm
-            onRegistered={(email, devOtp) => setStage({ kind: 'verify', email, devOtp })}
-            onShowLogin={() => setStage({ kind: 'login' })}
-          />
-        )}
+          {stage.kind === 'register' && (
+            <RegisterForm
+              onRegistered={(email, devOtp) => setStage({ kind: 'verify', email, devOtp })}
+              onShowLogin={() => setStage({ kind: 'login' })}
+            />
+          )}
 
-        {stage.kind === 'login' && (
-          <LoginForm
-            notice={stage.notice}
-            onLoggedIn={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
-            onShowRegister={() => setStage({ kind: 'register' })}
-          />
-        )}
+          {stage.kind === 'login' && (
+            <LoginForm
+              notice={stage.notice}
+              onLoggedIn={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
+              onShowRegister={() => setStage({ kind: 'register' })}
+            />
+          )}
 
-        {stage.kind === 'verify' && (
-          <VerifyForm
-            email={stage.email}
-            devOtp={stage.devOtp}
-            onVerified={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
-          />
-        )}
+          {stage.kind === 'verify' && (
+            <VerifyForm
+              email={stage.email}
+              devOtp={stage.devOtp}
+              onVerified={(tok) => { setClientToken(tok); setToken(tok); setStage({ kind: 'chat' }) }}
+            />
+          )}
 
-        {stage.kind === 'chat' && token && (
-          <ChatArea token={token} onSignOut={handleSignOut} />
-        )}
+          {stage.kind === 'chat' && token && (
+            <ChatArea token={token} onSignOut={handleSignOut} />
+          )}
+        </div>
 
       </main>
     </div>
