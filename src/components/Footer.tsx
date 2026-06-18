@@ -27,9 +27,9 @@ export default function Footer() {
             <LogoIcon style={{ width: 32, height: 32 }} />
             <div>
               <div className="nav-logo-name">
-                MS ADVOC<span>ATE</span>
+                <span style={{ color: '#ffffff' }}>EU</span><span style={{ color: '#c9a84c' }}>VISA</span><span style={{ color: '#ffffff' }}>ADVICE</span>
               </div>
-              <div className="nav-logo-since">SINCE 2023</div>
+              <div className="nav-logo-since">SINCE 2026</div>
             </div>
           </div>
           <p className="footer-brand-desc">
