@@ -160,7 +160,7 @@ export default function RegisterPage() {
       if (!res.ok) throw new Error(data.error || 'Verification failed')
 
       setToken(data.token)
-      router.push('/legalchat')
+      router.push('/subscribe')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Verification failed')
     } finally {
@@ -215,7 +215,7 @@ export default function RegisterPage() {
           </div>
           <div className="signin-left-bottom">
             <span>Already have an account?</span>
-            <Link href="/login" className="signin-gold-link">Sign in instead →</Link>
+            <Link href="/legal-login" className="signin-gold-link">Sign in instead →</Link>
           </div>
         </div>
       </div>

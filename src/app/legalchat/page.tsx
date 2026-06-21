@@ -167,6 +167,7 @@ export default function ChatPage() {
   const [authChecked, setAuthChecked] = useState(false)
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [limitNotice, setLimitNotice] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const authHeader = () => ({ Authorization: `Bearer ${getToken()}` })
@@ -187,7 +188,7 @@ export default function ChatPage() {
 
     const token = getToken()
     if (!token) {
-      router.push('/login')
+      router.push('/legal-login')
       return
     }
 
@@ -200,6 +201,10 @@ export default function ChatPage() {
           router.push('/client-chat')
           return
         }
+        if (!data.user?.subscriptionPlan || data.user.subscriptionPlan === 'none') {
+          router.push('/subscribe')
+          return
+        }
         const fullName = `${data.user?.firstName ?? ''} ${data.user?.lastName ?? ''}`.trim()
         setUserName(fullName || data.user?.email || '')
         setUserEmail(data.user?.email || '')
@@ -208,7 +213,7 @@ export default function ChatPage() {
       })
       .catch(() => {
         clearToken()
-        router.push('/login')
+        router.push('/legal-login')
       })
   }, [router])
 
@@ -219,19 +224,32 @@ export default function ChatPage() {
   if (!mounted || !authChecked) return null
 
   const handleNewConsultation = async () => {
+    setLimitNotice('')
     try {
       const res = await fetch(`${BACKEND}/api/legal-chat/conversations`, {
         method: 'POST',
         headers: authHeader(),
       })
-      if (!res.ok) return
+      if (!res.ok) {
+        const data = await res.json()
+        const msg: string = data.error ?? ''
+        if (msg.startsWith('CONVERSATION_LIMIT:')) {
+          const [, plan, limit, upgrade] = msg.split(':')
+          if (upgrade && upgrade !== 'none') {
+            setLimitNotice(`You've reached the ${limit}-conversation limit on your ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan. Upgrade to ${upgrade.charAt(0).toUpperCase() + upgrade.slice(1)} to continue.`)
+          } else {
+            setLimitNotice(`You've reached the ${limit}-conversation limit on your ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan.`)
+          }
+        }
+        return
+      }
       const data = await res.json()
       setConversations(prev => [data.conversation, ...prev])
       setActiveConversationId(data.conversation.id)
       setMessages([WELCOME_MESSAGE])
       setSidebarOpen(false)
     } catch {
-      // ignore — user can just keep chatting in the current conversation
+      // ignore
     }
   }
 
@@ -448,6 +466,34 @@ export default function ChatPage() {
             </Link>
           </div>
         </header>
+
+        {/* Conversation limit notice */}
+        {limitNotice && (
+          <div style={{
+            margin: '12px 20px 0',
+            background: '#1a1006',
+            border: '1.5px solid #c9a84c',
+            borderRadius: 12,
+            padding: '12px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}>
+            <span style={{ color: '#e6c96a', fontSize: 14, fontWeight: 500 }}>{limitNotice}</span>
+            <button
+              onClick={() => router.push('/subscribe')}
+              style={{
+                background: 'linear-gradient(135deg,#b8882a,#e6c96a)',
+                color: '#0d1117', border: 'none', borderRadius: 8,
+                padding: '7px 16px', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}
+            >
+              Upgrade
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="chat-messages">

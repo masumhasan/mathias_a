@@ -99,7 +99,7 @@ export default function ProfilePage() {
 
     const token = getToken()
     if (!token) {
-      router.push('/login')
+      router.push('/legal-login')
       return
     }
 
@@ -120,7 +120,7 @@ export default function ProfilePage() {
       })
       .catch(() => {
         clearToken()
-        router.push('/login')
+        router.push('/legal-login')
       })
   }, [router])
 
@@ -204,7 +204,7 @@ export default function ProfilePage() {
       // ignore network errors — clear the local session regardless
     } finally {
       clearToken()
-      router.push('/login')
+      router.push('/legal-login')
     }
   }
 
